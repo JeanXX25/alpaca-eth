@@ -31,6 +31,7 @@ Install: pip install -r requirements.txt
 import math
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -50,6 +51,15 @@ from alpaca.data.requests import CryptoBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
 import logging
+
+# alpaca-py's HTTP client sets NO timeout on its requests calls at all - if a
+# connection stalls (common enough on cloud hosts), a call can hang forever
+# with no exception and no log output, silently freezing the bot before it
+# ever reaches the main loop. Python's requests/urllib3 fall back to this
+# process-wide socket default when no per-call timeout is given, so setting
+# it here gives every network call in the process (data fetches, order
+# submission, account checks) a hard ceiling instead of hanging indefinitely.
+socket.setdefaulttimeout(30)
 
 # ============================================================================
 # LOGGING SETUP - stdout only (Railway captures stdout as logs)
@@ -642,6 +652,13 @@ def run():
 
     logger.info("Fetching initial market data...")
     trader.fetch_recent_data()
+    if trader.df_cache.empty:
+        logger.warning(
+            "Initial data fetch returned nothing. The bot will keep retrying "
+            "on the normal refresh cycle, but no signals are possible until "
+            "this resolves - watch for the 'consecutive empty data fetches' "
+            "warning in the periodic status log."
+        )
 
     iteration = 0
     last_full_update = time.time()
